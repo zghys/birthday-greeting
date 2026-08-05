@@ -1,5 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { supabase } from '../lib/supabase';
+
+const ADMIN_PASSWORD = 'birthday888';
 
 function AdminDashboard() {
   const [tab, setTab] = useState('photos');
@@ -7,16 +10,11 @@ function AdminDashboard() {
   const [checking, setChecking] = useState(true);
   const navigate = useNavigate();
 
-  // 检查登录
   useEffect(() => {
-    fetch('/api/auth/check', { credentials: 'include' })
-      .then(r => r.json())
-      .then(data => {
-        if (!data.isAdmin) { navigate('/admin/login'); return; }
-        setChecking(false);
-        setLoading(false);
-      })
-      .catch(() => navigate('/admin/login'));
+    const isAdmin = sessionStorage.getItem('sb_admin') === 'true';
+    if (!isAdmin) { navigate('/admin/login'); return; }
+    setChecking(false);
+    setLoading(false);
   }, [navigate]);
 
   if (checking) {
@@ -29,21 +27,17 @@ function AdminDashboard() {
 
   return (
     <div className="min-h-screen bg-birthday-bg">
-      {/* 顶部导航 */}
       <header className="bg-birthday-surface/60 backdrop-blur-md border-b border-birthday-purple/20 sticky top-0 z-30">
         <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
-          <h1 className="text-xl font-display font-bold bg-gradient-to-r from-birthday-gold to-birthday-pink bg-clip-text text-transparent">
-            管理后台
-          </h1>
+          <h1 className="text-xl font-display font-bold bg-gradient-to-r from-birthday-gold to-birthday-pink bg-clip-text text-transparent">管理后台</h1>
           <div className="flex items-center gap-4">
             <a href="/" target="_blank" className="text-birthday-muted/60 hover:text-birthday-muted text-sm transition-colors">查看首页</a>
-            <button onClick={async () => { await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }); navigate('/admin/login'); }}
+            <button onClick={() => { sessionStorage.removeItem('sb_admin'); navigate('/admin/login'); }}
               className="text-birthday-muted/60 hover:text-birthday-pink text-sm transition-colors">退出</button>
           </div>
         </div>
       </header>
 
-      {/* Tab 切换 */}
       <div className="max-w-6xl mx-auto px-4 pt-6">
         <div className="flex gap-1 bg-birthday-surface/30 rounded-xl p-1 border border-birthday-purple/10">
           {[
@@ -73,13 +67,14 @@ function PhotoManager() {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [caption, setCaption] = useState('');
-  const [newPhotoUrl, setNewPhotoUrl] = useState('');
   const [showAdd, setShowAdd] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
 
-  const fetchPhotos = useCallback(() => {
+  const fetchPhotos = useCallback(async () => {
     setLoading(true);
-    fetch('/api/photos').then(r => r.json()).then(data => { setPhotos(data); setLoading(false); }).catch(() => setLoading(false));
+    const { data } = await supabase.from('photos').select('*').order('sort_order', { ascending: true }).order('created_at', { ascending: false });
+    if (data) setPhotos(data);
+    setLoading(false);
   }, []);
 
   useEffect(() => { fetchPhotos(); }, [fetchPhotos]);
@@ -88,34 +83,34 @@ function PhotoManager() {
     const file = e.target.files[0];
     if (!file) return;
     setUploading(true);
-    const form = new FormData();
-    form.append('photo', file);
-    try {
-      const res = await fetch('/api/upload', { method: 'POST', credentials: 'include', body: form });
-      const data = await res.json();
-      if (res.ok) setNewPhotoUrl(data.url);
-    } catch (e) { alert('上传失败'); }
+    const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 8)}.${file.name.split('.').pop()}`;
+    const { error } = await supabase.storage.from('照片').upload(fileName, file);
+    if (error) { alert('上传失败: ' + error.message); setUploading(false); return; }
+    const { data: { publicUrl } } = supabase.storage.from('照片').getPublicUrl(fileName);
+    alert('照片上传成功！请添加描述后点击"确认添加"');
     setUploading(false);
+    // 保存到 global 以便后续使用
+    window._lastUploadUrl = publicUrl;
   };
 
   const handleAdd = async () => {
-    if (!newPhotoUrl) { alert('请先上传照片'); return; }
-    try {
-      const res = await fetch('/api/photos', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
-        body: JSON.stringify({ photo_url: newPhotoUrl, caption: caption.trim(), sort_order: photos.length }),
-      });
-      if (res.ok) { setShowAdd(false); setNewPhotoUrl(''); setCaption(''); fetchPhotos(); }
-      else { const d = await res.json(); alert(d.error || '添加失败'); }
-    } catch (e) { alert('添加失败'); }
+    const url = window._lastUploadUrl;
+    if (!url) { alert('请先上传照片'); return; }
+    const { error } = await supabase.from('photos').insert({
+      photo_url: url,
+      caption: caption.trim(),
+      sort_order: photos.length,
+    });
+    if (error) { alert('添加失败: ' + error.message); return; }
+    setShowAdd(false); setCaption(''); window._lastUploadUrl = '';
+    fetchPhotos();
   };
 
   const handleDelete = async (id) => {
-    try {
-      const res = await fetch(`/api/photos/${id}`, { method: 'DELETE', credentials: 'include' });
-      if (res.ok) { setDeleteConfirm(null); fetchPhotos(); }
-      else { const d = await res.json(); alert(d.error || '删除失败'); }
-    } catch (e) { alert('删除失败'); }
+    const { error } = await supabase.from('photos').delete().eq('id', id);
+    if (error) { alert('删除失败: ' + error.message); return; }
+    setDeleteConfirm(null);
+    fetchPhotos();
   };
 
   return (
@@ -123,11 +118,9 @@ function PhotoManager() {
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-2xl font-bold text-birthday-text">爱心墙照片</h2>
         <button onClick={() => setShowAdd(true)}
-          className="px-5 py-2 bg-gradient-to-r from-birthday-gold to-birthday-pink rounded-xl text-white font-semibold shadow-lg hover:shadow-xl hover:shadow-birthday-gold/20 transition-all"
-        >+ 添加照片</button>
+          className="px-5 py-2 bg-gradient-to-r from-birthday-gold to-birthday-pink rounded-xl text-white font-semibold shadow-lg hover:shadow-xl transition-all">+ 添加照片</button>
       </div>
 
-      {/* 添加照片表单 */}
       {showAdd && (
         <div className="bg-birthday-surface/40 rounded-xl p-6 border border-birthday-purple/20 mb-6">
           <h3 className="text-lg font-bold text-birthday-gold mb-4">添加新照片</h3>
@@ -138,21 +131,20 @@ function PhotoManager() {
                 {uploading ? '上传中...' : '选择图片'}
                 <input type="file" accept="image/jpeg,image/png,image/gif,image/webp" onChange={handleUpload} className="hidden" disabled={uploading} />
               </label>
-              {newPhotoUrl && (
+              {window._lastUploadUrl && (
                 <div className="mt-3 flex items-center gap-3">
-                  <img src={newPhotoUrl} alt="preview" className="w-20 h-20 rounded-lg object-cover border border-birthday-purple/20" />
-                  <button onClick={() => setNewPhotoUrl('')} className="text-red-400 text-xs">移除</button>
+                  <img src={window._lastUploadUrl} alt="preview" className="w-20 h-20 rounded-lg object-cover border border-birthday-purple/20" />
+                  <span className="text-birthday-muted/60 text-xs">上传成功 ✓</span>
                 </div>
               )}
             </div>
             <div>
               <label className="block text-birthday-text/80 text-sm mb-2">照片描述（可选）</label>
               <input type="text" value={caption} onChange={e => setCaption(e.target.value)}
-                className="w-full px-4 py-2.5 bg-birthday-bg/50 border border-birthday-purple/20 rounded-xl text-birthday-text placeholder-birthday-muted/30 focus:border-birthday-gold/50 transition-all"
-                placeholder="给这张照片配一句话..." />
+                className="w-full px-4 py-2.5 bg-birthday-bg/50 border border-birthday-purple/20 rounded-xl text-birthday-text placeholder-birthday-muted/30 focus:border-birthday-gold/50 transition-all" placeholder="给这张照片配一句话..." />
             </div>
             <div className="flex gap-3">
-              <button onClick={() => { setShowAdd(false); setNewPhotoUrl(''); setCaption(''); }}
+              <button onClick={() => { setShowAdd(false); setCaption(''); window._lastUploadUrl = ''; }}
                 className="px-5 py-2 bg-birthday-bg/50 border border-birthday-purple/20 rounded-xl text-birthday-muted hover:bg-birthday-bg/70 transition-colors">取消</button>
               <button onClick={handleAdd}
                 className="px-5 py-2 bg-gradient-to-r from-birthday-gold to-birthday-pink rounded-xl text-white font-semibold">确认添加</button>
@@ -161,7 +153,6 @@ function PhotoManager() {
         </div>
       )}
 
-      {/* 照片列表 */}
       {loading ? (
         <div className="flex justify-center py-16"><div className="w-10 h-10 border-4 border-birthday-purple border-t-transparent rounded-full animate-spin" /></div>
       ) : photos.length === 0 ? (
@@ -171,11 +162,11 @@ function PhotoManager() {
         </div>
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-          {photos.map((photo) => (
+          {photos.map(photo => (
             <div key={photo.id} className="group relative rounded-xl overflow-hidden bg-birthday-surface/40 border border-birthday-purple/10 hover:border-birthday-pink/30 transition-all">
               <div className="aspect-square overflow-hidden">
                 <img src={photo.photo_url} alt={photo.caption || ''} className="w-full h-full object-cover" loading="lazy"
-                  onError={(e) => { e.target.style.display = 'none'; e.target.parentElement.classList.add('flex', 'items-center', 'justify-center', 'bg-birthday-surface'); e.target.parentElement.innerHTML = '<span class=\"text-3xl\">📷</span>'; }} />
+                  onError={(e) => { e.target.style.display = 'none'; e.target.parentElement.classList.add('flex', 'items-center', 'justify-center', 'bg-birthday-surface'); e.target.parentElement.innerHTML = '<span class="text-3xl">📷</span>'; }} />
               </div>
               <div className="p-3">
                 <p className="text-birthday-text/70 text-sm truncate">{photo.caption || '(无描述)'}</p>
@@ -189,7 +180,6 @@ function PhotoManager() {
         </div>
       )}
 
-      {/* 删除确认 */}
       {deleteConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => setDeleteConfirm(null)}>
           <div className="bg-birthday-surface rounded-2xl p-8 w-full max-w-sm border border-birthday-purple/20 shadow-2xl text-center" onClick={e => e.stopPropagation()}>
@@ -214,23 +204,26 @@ function SettingsManager() {
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    fetch('/api/settings').then(r => r.json()).then(data => {
-      setSettings({ birthday_name: data.birthday_name || '', blessing_message: data.blessing_message || '', page_title: data.page_title || '' });
+    async function load() {
+      const { data } = await supabase.from('settings').select('*');
+      if (data) {
+        const s = {};
+        data.forEach(r => { s[r.key] = r.value; });
+        setSettings({ birthday_name: s.birthday_name || '', blessing_message: s.blessing_message || '', page_title: s.page_title || '' });
+      }
       setLoading(false);
-    }).catch(() => setLoading(false));
+    }
+    load();
   }, []);
 
   const handleSave = async () => {
     setSaving(true);
-    try {
-      const res = await fetch('/api/settings', {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
-        body: JSON.stringify(settings),
-      });
-      if (res.ok) { setSaved(true); setTimeout(() => setSaved(false), 2000); }
-      else alert('保存失败');
-    } catch (e) { alert('保存失败'); }
+    for (const [key, value] of Object.entries(settings)) {
+      await supabase.from('settings').upsert({ key, value }, { onConflict: 'key' });
+    }
     setSaving(false);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
   };
 
   if (loading) return <div className="flex justify-center py-16"><div className="w-10 h-10 border-4 border-birthday-purple border-t-transparent rounded-full animate-spin" /></div>;
@@ -243,7 +236,6 @@ function SettingsManager() {
           <label className="block text-birthday-text/80 text-sm mb-2">寿星姓名</label>
           <input type="text" value={settings.birthday_name} onChange={e => setSettings(p => ({ ...p, birthday_name: e.target.value }))}
             className="w-full px-4 py-3 bg-birthday-bg/50 border border-birthday-purple/20 rounded-xl text-birthday-text focus:border-birthday-gold/50 transition-all" placeholder="如：小明" />
-          <p className="text-birthday-muted/30 text-xs mt-1">首页会显示"祝 [姓名] 生日快乐！"</p>
         </div>
         <div>
           <label className="block text-birthday-text/80 text-sm mb-2">祝福语</label>
@@ -270,16 +262,18 @@ function VisitorLog() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/api/visitors', { credentials: 'include' }).then(r => r.json()).then(data => {
-      setVisitors(data); setLoading(false);
-    }).catch(() => setLoading(false));
+    async function load() {
+      const { data } = await supabase.from('visitors').select('*').order('created_at', { ascending: false });
+      if (data) setVisitors(data);
+      setLoading(false);
+    }
+    load();
   }, []);
 
   return (
     <div>
       <h2 className="text-2xl font-bold text-birthday-text mb-2">👥 祝福记录</h2>
       <p className="text-birthday-muted/60 text-sm mb-6">共 {visitors.length} 位同学送上了祝福</p>
-
       {loading ? (
         <div className="flex justify-center py-16"><div className="w-10 h-10 border-4 border-birthday-purple border-t-transparent rounded-full animate-spin" /></div>
       ) : visitors.length === 0 ? (
