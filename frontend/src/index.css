@@ -1,0 +1,72 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  background-color: #0f0a1a;
+  color: #fdf6e3;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* 星星闪烁 */
+@keyframes twinkle {
+  0%, 100% { opacity: 0.15; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.3); }
+}
+.animate-twinkle {
+  animation: twinkle 3s ease-in-out infinite;
+}
+
+/* 浮动 */
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-15px); }
+}
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
+
+/* 淡入上移 */
+@keyframes fadeInUp {
+  0% { opacity: 0; transform: translateY(30px) scale(0.95); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+.animate-fade-in-up {
+  animation: fadeInUp 0.5s ease-out forwards;
+}
+
+/* 飘落 */
+@keyframes fall {
+  0% { transform: translateY(-30px) rotate(0deg); opacity: 0.8; }
+  100% { transform: translateY(100vh) rotate(720deg); opacity: 0; }
+}
+.animate-fall {
+  animation: fall 5s linear forwards;
+}
+
+/* 五彩纸屑 */
+@keyframes confetti {
+  0% { transform: translateY(-20px) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(100vh) rotate(1080deg); opacity: 0; }
+}
+.animate-confetti {
+  animation: confetti 3s ease-out forwards;
+}
+
+/* 弹跳 */
+@keyframes bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+.animate-bounce {
+  animation: bounce 2s infinite;
+}
+
+/* 滚动条样式 */
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: #1a1035; }
+::-webkit-scrollbar-thumb { background: #8b5cf6; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #a78bfa; }
